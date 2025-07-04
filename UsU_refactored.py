@@ -2,12 +2,13 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import pygame as pg
-from random import choice
+from random import randint
 import numpy as np
 
 pg.init()
 Info_Object = pg.display.Info()
-SCREEN_WIDTH, SCREEN_HEIGHT = (Info_Object.current_w) * 4 // 5, (Info_Object.current_h) * 4 // 5
+PICKER_BLANK = 30
+SCREEN_WIDTH, SCREEN_HEIGHT = (Info_Object.current_w) * 4 // 5, (Info_Object.current_h - PICKER_BLANK) * 4 // 5
 FPS = 30
 
 '''
@@ -83,13 +84,56 @@ class Glass:
     
     def draw(self, screen):
         screen.blit(self.image, self.rect)
-
-
+    
+class ColorPicker:
+    def __init__(self, color, coordinate, surface):
+        super().__init__()
+        self.color = color
+        self.surface = surface
+        self.rect = surface.get_rect(topleft= coordinate)
+        
+    def draw(self, surface):
+        pg.draw.rect(surface, self.color, self.rect, border_radius=8)
+        
+        
+        
+class ColorPickers:
+    def __init__(self, colors):
+        super().__init__()
+        self.colors = colors
+        self.pickers = []
+        
+    def addPicker(self):
+        if len(self.colors) == len(self.pickers):
+            raise Exception(f"all_colors value doesn't equal to pickers value \n {len(self.colors) = } \n {len(self.pickers) = }")
+        self.pickers.clear()
+        picker_count = len(self.colors)
+        if picker_count == 0:
+            return
+        picker_width = SCREEN_WIDTH // picker_count
+        for i, color in enumerate(self.colors):
+            self.pickers.append(ColorPicker(color, (picker_width * i, SCREEN_HEIGHT), 
+                                            pg.Surface((picker_width, PICKER_BLANK))))
+            
+    def subPicker(self):
+        self.pickers.pop()
+            
+    def draw(self, surface):
+        if self.pickers != []:        
+            for picker in self.pickers:
+                picker.draw(surface)
+            
+        
 class Simulation:
     def __init__(self):
-        self.screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT + PICKER_BLANK))
         self.clock = pg.time.Clock()
         self.running = True
+        self.all_colors = []
+        cursor = pg.cursors.Cursor((0, 0), pg.transform.scale(pg.image.load(resource_path("graphics/color_cursor.png")), 
+                                                              (37, 55)))
+        pg.mouse.set_cursor(cursor)
+        self.colorPickers = ColorPickers(self.all_colors)
         self.grid = Grid()
         self.glasses = []
 
@@ -101,6 +145,13 @@ class Simulation:
                 if event.key == pg.K_SPACE:
                     self.grid.multiply()
                     self.glasses.clear()
+                if event.key == pg.K_UP:
+                    self.all_colors.append((randint(0, 255), randint(0, 255), randint(0, 255)))
+                    self.colorPickers.addPicker()
+                if event.key == pg.K_DOWN:
+                    if self.colorPickers.pickers != []:
+                        self.all_colors.pop()
+                        self.colorPickers.subPicker()
 
             if event.type == pg.MOUSEBUTTONDOWN:
                 self.put_glass()
@@ -121,6 +172,7 @@ class Simulation:
         self.grid.draw(self.screen)
         for glass in self.glasses:
             glass.draw(self.screen)
+        self.colorPickers.draw(self.screen)
         
 
     def run(self):
@@ -129,7 +181,7 @@ class Simulation:
             self.update()
 
             # First, clear the screen from the last frame
-            self.screen.fill("black") # Or any background color
+            self.screen.fill("blue") # Or any background color
 
             self.draw_objects()
             # print("okey")  # It's better to remove this so it doesn't flood your console
