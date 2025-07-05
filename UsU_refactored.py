@@ -21,6 +21,67 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
+# `def tone_change` KISMI AI TARAFINDAN YAPILMIŞTIR
+def tone_change(surface, new_color_rgb):
+    """
+    Bir yüzeydeki kırmızı tonlarını, L*a*b* renk uzayını kullanarak yeni bir
+    hedef renge dönüştürür. Bu yöntem, gri/doygunluğu düşük hedef renklerde
+    bile doğru sonuç verir ve orijinal gölgeleri mükemmel şekilde korur.
+
+    :param surface: Rengi değiştirilecek Pygame yüzeyi.
+    :param new_color_rgb: Hedef renk (R, G, B) tuple.
+    :return: Rengi değiştirilmiş yeni Pygame yüzeyi.
+    """
+    # 1. Alfa Kanalını ve Orijinal Yüzeyi Koru
+    has_alpha = surface.get_flags() & pg.SRCALPHA
+    if has_alpha:
+        original_surface_copy = surface.copy()
+
+    # 2. Pygame yüzeyini OpenCV formatına (BGR) hazırla
+    view = pg.surfarray.pixels3d(surface)
+    img_bgr = cv2.cvtColor(view.transpose([1, 0, 2]), cv2.COLOR_RGB2BGR)
+
+    # 3. Kırmızı pikselleri bulmak için HSV ile maske oluştur (HSV bu iş için idealdir)
+    hsv_image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    lower_red1 = np.array([0, 70, 50])
+    upper_red1 = np.array([10, 255, 255])
+    mask1 = cv2.inRange(hsv_image, lower_red1, upper_red1)
+    lower_red2 = np.array([170, 70, 50])
+    upper_red2 = np.array([179, 255, 255])
+    mask2 = cv2.inRange(hsv_image, lower_red2, upper_red2)
+    red_mask = mask1 + mask2
+
+    if not np.any(red_mask):
+        return surface.copy()
+
+    # 4. L*a*b* Renk Nakli
+    # Kaynak resmi L*a*b* uzayına çevir
+    lab_image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+
+    # Hedef rengi L*a*b* uzayına çevirip a* ve b* kanallarını al
+    target_rgb_u8 = np.uint8([[new_color_rgb]])
+    target_lab = cv2.cvtColor(target_rgb_u8, cv2.COLOR_RGB2LAB)
+    target_a = target_lab[0][0][1]
+    target_b = target_lab[0][0][2]
+
+    # Maskelenen piksellerin sadece renk kanallarını (a* ve b*) değiştir.
+    # L* (parlaklık) kanalına dokunma!
+    lab_image[red_mask > 0, 1] = target_a
+    lab_image[red_mask > 0, 2] = target_b
+
+    # 5. Tekrar Pygame formatına dönüştür
+    final_bgr = cv2.cvtColor(lab_image, cv2.COLOR_LAB2BGR)
+    final_rgb = cv2.cvtColor(final_bgr, cv2.COLOR_BGR2RGB)
+    
+    final_surface = pg.surfarray.make_surface(final_rgb.transpose([1, 0, 2]))
+
+    # 6. Alfa Kanalını Geri Yükle
+    if has_alpha:
+        # Orijinal kopyanın piksellerini değiştirerek alfayı %100 koru
+        pg.surfarray.pixels3d(original_surface_copy)[:] = final_rgb.transpose([1, 0, 2])
+        return original_surface_copy
+    else:
+        return final_surface.convert()
 class GridCell:
     def __init__(self, coord, width, height):
         super().__init__()
@@ -32,7 +93,7 @@ class GridCell:
 
     def highlight(self):
         if self.rect.collidepoint(pg.mouse.get_pos()):
-            self.color = "red"
+            self.color = "firebrick4"
         else:
             self.color = "white"
 
@@ -77,12 +138,33 @@ class Grid:
             grid.draw(screen)
 
 class Glass:
-    def __init__(self, grid_center, width, height):
+    def __init__(self, grid):
         super().__init__()
+        self.grid = grid  # grid is a GridCell instance
+        try:
+            # Use the GridCell's rect for size
+            self.size = min(self.grid.rect.width, self.grid.rect.height)
+        except AttributeError as e:
+            print(f"error: {e}")
+            self.size = 10  # fallback size
         self.image = pg.image.load(resource_path("graphics/glass.png")).convert_alpha()
-        self.image = pg.transform.scale(self.image, (width, height))
-        self.rect = self.image.get_rect(center=grid_center)
+        self.image = pg.transform.scale(self.image, (self.size, self.size))
+        self.rect = self.image.get_rect(center=self.grid.rect.center)
         self._is_full = False
+        
+    def update_glass(self, fill: bool = False, color = None):
+        try:
+            self.size = min(self.grid.rect.width, self.grid.rect.height)
+        except AttributeError as e:
+            print(f"error: {e}")
+        if not fill:
+            self.image = pg.image.load(resource_path("graphics/glass.png")).convert_alpha()
+            self.image = pg.transform.scale(self.image, (self.size, self.size))
+        else:
+            self.color = color
+            glass_img = pg.transform.scale(pg.image.load(resource_path("graphics/filled_glass.png")), (self.size, self.size))
+            self.image = tone_change(glass_img, self.color)
+
     
     def draw(self, screen):
         screen.blit(self.image, self.rect)
@@ -110,6 +192,32 @@ class ColorPickers:
         self.colors = colors
         self.pickers = []
         
+    @staticmethod
+    def create_random_color(all_colors):
+        treshold = 20
+        attempts = 0
+        while True:
+            random_color = (randint(0, 255), randint(0, 255), randint(0, 255))
+            # If there are no colors yet, accept immediately
+            if not all_colors:
+                break
+            # Check if random_color is sufficiently different from all existing colors
+            is_different = True
+            for color in all_colors:
+                if (
+                    abs(random_color[0] - color[0]) < treshold or
+                    abs(random_color[1] - color[1]) < treshold or
+                    abs(random_color[2] - color[2]) < treshold
+                ):
+                    is_different = False
+                    break
+            if is_different:
+                break
+            attempts += 1
+            if attempts >= 100:
+                treshold = max(1, treshold - 5)
+                attempts = 0
+        return random_color
     def addPicker(self):
         if len(self.colors) == len(self.pickers):
             raise Exception(f"all_colors value doesn't equal to pickers value \n {len(self.colors) = } \n {len(self.pickers) = }")
@@ -125,14 +233,12 @@ class ColorPickers:
     def subPicker(self):
         self.pickers.pop()
         
+        
     def color_pick(self):
         for picker in self.pickers:
             if picker.clicked():
-                print("clicked")
                 if not hasattr(self, "_picked_color"):
                     self._picked_color = picker.color
-                    
-            
             
     def draw(self, surface):
         if self.pickers != []:        
@@ -154,47 +260,13 @@ class Simulation:
         self.grid = Grid()
         self.glasses = []
         
-    # `def tone_change` KISMI AI TARAFINDAN YAPILMIŞTIR.
-    @staticmethod
-    def tone_change(surface, new_color_rgb):
-        # Check if the surface has an alpha (transparency) channel
-        has_alpha = surface.get_masks()[3] != 0
-        if has_alpha:
-            # If so, extract and save the alpha channel for later restoration
-            alpha = pg.surfarray.pixels_alpha(surface).copy()
-        # Get the RGB pixel data from the surface as a numpy array
-        view = pg.surfarray.pixels3d(surface)
-        # Convert the RGB array to BGR format for OpenCV compatibility
-        img_bgr = cv2.cvtColor(view.transpose([1, 0, 2]), cv2.COLOR_RGB2BGR)
-        # Convert the BGR image to HSV color space for easier color manipulation
-        hsv_image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-        # Define lower and upper bounds for the red color in HSV (red wraps around the hue axis)
-        lower_red1 = np.array([0, 70, 50])
-        upper_red1 = np.array([10, 255, 255])
-        mask1 = cv2.inRange(hsv_image, lower_red1, upper_red1)
-        lower_red2 = np.array([170, 70, 50])
-        upper_red2 = np.array([179, 255, 255])
-        mask2 = cv2.inRange(hsv_image, lower_red2, upper_red2)
-        # Combine both masks to cover the full red hue range
-        red_mask = mask1 + mask2
-        # Convert the new color from RGB to HSV to extract its hue
-        new_color_hsv = cv2.cvtColor(np.uint8([[new_color_rgb[::-1]]]), cv2.COLOR_BGR2HSV)
-        new_hue = new_color_hsv[0][0][0]
-        # Replace the hue of all red pixels with the new hue, preserving saturation and value
-        hsv_image[red_mask > 0, 0] = new_hue
-        # Convert the HSV image back to BGR, then to RGB for Pygame
-        final_rgb = cv2.cvtColor(cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR), cv2.COLOR_BGR2RGB)
-        # Create a new Pygame surface from the modified RGB array
-        final_image = pg.surfarray.make_surface(final_rgb.transpose([1, 0, 2]))
-        if has_alpha:
-            # If the original had alpha, convert and restore the alpha channel
-            final_image = final_image.convert_alpha()
-            pg.surfarray.pixels_alpha(final_image)[:, :] = alpha
-        else:
-            # Otherwise, just convert to a standard surface
-            final_image = final_image.convert()
-        # Return the recolored surface
-        return final_image
+    def subColor(self):
+        for glass in self.glasses:
+            if hasattr(glass, "color"):
+                if glass.color == self.all_colors[-1]:
+                    glass.update_glass()
+        self.all_colors.pop()
+        self.colorPickers.subPicker()
     
     def handle_events(self):
         for event in pg.event.get():
@@ -206,12 +278,11 @@ class Simulation:
                     self.grid.multiply()
                     self.glasses.clear()
                 if event.key == pg.K_UP:
-                    self.all_colors.append((randint(0, 255), randint(0, 255), randint(0, 255)))
+                    self.all_colors.append(self.colorPickers.create_random_color(self.all_colors))
                     self.colorPickers.addPicker()
                 if event.key == pg.K_DOWN:
                     if self.colorPickers.pickers != []:
-                        self.all_colors.pop()
-                        self.colorPickers.subPicker()
+                        self.subColor()
             
             if event.type == pg.MOUSEBUTTONDOWN:
                 self.put_or_update_glass()
@@ -219,7 +290,7 @@ class Simulation:
                 if hasattr(self.colorPickers, "_picked_color"):
                     self.picked_color = self.colorPickers._picked_color
                     del self.colorPickers._picked_color
-                    cursor_image = self.tone_change(
+                    cursor_image = tone_change(
                         pg.transform.scale(pg.image.load(resource_path("graphics/color_cursor.png")), (37, 55)),
                         self.picked_color
                     )
@@ -231,18 +302,12 @@ class Simulation:
             if grid.rect.collidepoint(pg.mouse.get_pos()):
                 if not grid._is_full:
                     grid._is_full = True
-                    if self.grid.cell_width >= self.grid.cell_height:
-                        self.glasses.append(Glass(grid.rect.center, self.grid.cell_height, self.grid.cell_height))
-                    else:
-                        self.glasses.append(Glass(grid.rect.center, self.grid.cell_width, self.grid.cell_width))
+                    self.glasses.append(Glass(grid))
                 else:
                     for glass in self.glasses:
                         if glass.rect.center == grid.rect.center and not glass._is_full and self.picked_color:
-                            if self.grid.cell_width >= self.grid.cell_height:
-                                glass_w, glass_h = self.grid.cell_height, self.grid.cell_height
-                            else: glass_w, glass_h = self.grid.cell_width, self.grid.cell_width
-                            glass_img = pg.transform.scale(pg.image.load(resource_path("graphics/filled_glass.png")), (glass_w, glass_h))
-                            glass.image = self.tone_change(glass_img, self.picked_color)
+                            print(self.picked_color)
+                            glass.update_glass(fill=True, color= self.picked_color)
                     
     def update(self):
         self.grid.update()
@@ -263,7 +328,6 @@ class Simulation:
             self.screen.fill("blue") # Or any background color
 
             self.draw_objects()
-            # print("okey")  # It's better to remove this so it doesn't flood your console
 
             # IMPORTANT: Update the display to show the changes
             pg.display.flip()
