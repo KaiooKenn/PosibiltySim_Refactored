@@ -150,6 +150,7 @@ class Glass:
         self.image = pg.image.load(resource_path("graphics/glass.png")).convert_alpha()
         self.image = pg.transform.scale(self.image, (self.size, self.size))
         self.rect = self.image.get_rect(center=self.grid.rect.center)
+        self.paid = False
         self._is_full = False
         
     def update_glass(self, fill: bool = False, color = None):
@@ -175,14 +176,42 @@ class ColorPicker:
         self.color = color
         self.surface = surface
         self.rect = surface.get_rect(topleft= coordinate)
+        self.count = 0
+        self.font = pg.font.Font(None, 30)
+        self.font.set_italic(True)
+        self.text_color = self.get_font_color(self.color)
         
-    def clicked(self):
+    # `def get_font_color` KISMI AI İLE YAPILMIŞTIR.    
+    @staticmethod
+    def get_font_color(bg_color):
+        # If bg_color is a pygame.Color or has r, g, b attributes:
+        if hasattr(bg_color, 'r') and hasattr(bg_color, 'g') and hasattr(bg_color, 'b'):
+            r, g, b = bg_color.r, bg_color.g, bg_color.b
+        # If bg_color is a tuple/list, use only the first three elements
+        elif isinstance(bg_color, (tuple, list)):
+            r, g, b = bg_color[:3]
+        else:
+            # Fallback default
+            r, g, b = (0, 0, 0)
+    
+        brightness = (r * 299 + g * 587 + b * 114) / 1000
+        # Return black if brightness is high, else white
+        return (0, 0, 0) if brightness > 128 else (255, 255, 255)
+    
+    def add_or_sub_count(self, value):
+        if self.check_mouse():
+            self.count = max(0, self.count + value)
+
+        
+    def check_mouse(self):
         if self.rect.collidepoint(pg.mouse.get_pos()):
             return True
         return False
         
     def draw(self, surface):
         pg.draw.rect(surface, self.color, self.rect, border_radius=8)
+        self.text = self.font.render(str(int(self.count)), True, self.text_color)
+        surface.blit(self.text, self.text.get_rect(center= self.rect.center))
         
         
         
@@ -218,6 +247,11 @@ class ColorPickers:
                 treshold = max(1, treshold - 5)
                 attempts = 0
         return random_color
+    
+    def count(self, value):
+        for picker in self.pickers:
+            picker.add_or_sub_count(value)
+    
     def addPicker(self):
         if len(self.colors) == len(self.pickers):
             raise Exception(f"all_colors value doesn't equal to pickers value \n {len(self.colors) = } \n {len(self.pickers) = }")
@@ -236,7 +270,7 @@ class ColorPickers:
         
     def color_pick(self):
         for picker in self.pickers:
-            if picker.clicked():
+            if picker.check_mouse() and picker.count > 0:
                 if not hasattr(self, "_picked_color"):
                     self._picked_color = picker.color
             
@@ -283,19 +317,31 @@ class Simulation:
                 if event.key == pg.K_DOWN:
                     if self.colorPickers.pickers != []:
                         self.subColor()
-            
+                if self.colorPickers.pickers != []:
+                    if event.key == pg.K_LEFT:
+                        self.colorPickers.count(-1)
+                    if event.key == pg.K_RIGHT:
+                        self.colorPickers.count(+1)
             if event.type == pg.MOUSEBUTTONDOWN:
                 self.put_or_update_glass()
                 self.colorPickers.color_pick()  # <-- Add this line
                 if hasattr(self.colorPickers, "_picked_color"):
                     self.picked_color = self.colorPickers._picked_color
                     del self.colorPickers._picked_color
-                    cursor_image = tone_change(
-                        pg.transform.scale(pg.image.load(resource_path("graphics/color_cursor.png")), (37, 55)),
-                        self.picked_color
-                    )
-                    cursor = pg.cursors.Cursor((0, 0), cursor_image)
-                    pg.mouse.set_cursor(cursor)
+                    self.coloring_mouse()
+
+                
+    def coloring_mouse(self, coloring: bool = True):
+        if coloring:
+            cursor_image = tone_change(
+                pg.transform.scale(pg.image.load(resource_path("graphics/color_cursor.png")), (37, 55)),
+                self.picked_color
+            )
+        else:
+            cursor_image = pg.transform.scale(pg.image.load(resource_path("graphics/color_cursor.png")), (37, 55))
+            
+        cursor = pg.cursors.Cursor((0, 0), cursor_image)
+        pg.mouse.set_cursor(cursor)
 
     def put_or_update_glass(self):
         for grid in self.grid.grids:
@@ -308,6 +354,18 @@ class Simulation:
                         if glass.rect.center == grid.rect.center and not glass._is_full and self.picked_color:
                             print(self.picked_color)
                             glass.update_glass(fill=True, color= self.picked_color)
+                            self.picked_color = None
+                            self.coloring_mouse(False)
+                            self.update_counts()
+                            
+    def update_counts(self):
+        for glass in self.glasses:
+            if hasattr(glass, "color") and not glass.paid:
+                for colorpicker in self.colorPickers.pickers:
+                    if colorpicker.color == glass.color:
+                        colorpicker.count = max(0, colorpicker.count - 1)
+                        glass.paid = True
+                
                     
     def update(self):
         self.grid.update()
