@@ -161,6 +161,8 @@ class Glass:
             self.size = min(self.grid.rect.width, self.grid.rect.height)
         except AttributeError as e:
             print(f"error: {e}")
+        if hasattr(self, 'color'):
+            del self.color
         if not fill:
             self.image = pg.image.load(resource_path("graphics/glass.png")).convert_alpha()
             self.image = pg.transform.scale(self.image, (self.size, self.size))
@@ -180,6 +182,7 @@ class ColorPicker:
         self.surface = surface
         self.rect = surface.get_rect(topleft= coordinate)
         self.count = 0
+        self.shownvalue = 0
         self.font = pg.font.Font(None, 30)
         self.font.set_italic(True)
         self.text_color = self.get_font_color(self.color)
@@ -201,11 +204,16 @@ class ColorPicker:
         # Return black if brightness is high, else white
         return (0, 0, 0) if brightness > 128 else (255, 255, 255)
     
-    def add_or_sub_count(self, value):
-        if self.check_mouse():
-            self.count = max(0, self.count + value)
-
-        
+    def add_or_sub_count(self, value, need_mouse, *attrs): # TODO: if you don't need to then get rid of `need_mouse`
+        if need_mouse and not self.check_mouse():
+            return  # Only update if mouse is over this picker
+        for attr in attrs:
+            try:
+                current = getattr(self, attr)
+                setattr(self, attr, max(0, current + value))
+            except Exception:
+                raise Exception(f"There is no {attr} in self.attrs")  #
+            
     def check_mouse(self):
         if self.rect.collidepoint(pg.mouse.get_pos()):
             return True
@@ -213,7 +221,7 @@ class ColorPicker:
         
     def draw(self, surface):
         pg.draw.rect(surface, self.color, self.rect, border_radius=8)
-        self.text = self.font.render(str(int(self.count)), True, self.text_color)
+        self.text = self.font.render(str(int(self.shownvalue)), True, self.text_color)
         surface.blit(self.text, self.text.get_rect(center= self.rect.center))
         
         
@@ -250,9 +258,9 @@ class ColorPickers:
                 attempts = 0
         return random_color
     
-    def count(self, value):
+    def count(self, value, need_mouse, attrs):
         for picker in self.pickers:
-            picker.add_or_sub_count(value)
+            picker.add_or_sub_count(value, need_mouse, *attrs)  # Unpack attrs here
     
     def addPicker(self):
         if len(self.colors) == len(self.pickers):
@@ -269,10 +277,9 @@ class ColorPickers:
     def subPicker(self):
         self.pickers.pop()
         
-        
     def color_pick(self):
         for picker in self.pickers:
-            if picker.check_mouse() and picker.count > 0:
+            if picker.check_mouse() and picker.shownvalue > 0:
                 if not hasattr(self, "_picked_color"):
                     self._picked_color = picker.color
             
@@ -299,7 +306,11 @@ class Button:
         else:
             self.color = 'azure2'
             
-    # def progress(self) TODO: make foncs to buttontypes
+    def get_buttontype(self):
+        if self.rect.collidepoint(pg.mouse.get_pos()):
+            return self.buttontype
+        return False
+            
             
     def draw(self, surface):
         pg.draw.rect(surface, self.color, self.rect, border_radius=8)
@@ -307,16 +318,25 @@ class Button:
             
 class Buttons:
     def __init__(self):
-        self.button_count = 1
-        self.buttons = []
+        self.button_count = 6
         surface = pg.Surface((BUTTON_HUD, SCREEN_HEIGHT//self.button_count))
+        coordinates = []
+        buttontypes = ["trash_bin", "unfill", "random_one",
+                       "random_all", "graphic0", "graphic1"]
         for a in range(self.button_count):
             coordinate = (DISPLAY_WIDTH, (SCREEN_HEIGHT//self.button_count)*a)
-            self.buttons.append(Button(surface, coordinate))
+            coordinates.append(coordinate)
+        self.buttons = [Button(surface, coordinates[a], buttontype=buttontypes[a]) for a in range(self.button_count)]
             
     def update(self):
         for button in self.buttons:
             button.highlight()
+    
+    def get_buttontype(self):
+        for button in self.buttons:
+            if button.get_buttontype():
+                print(button.get_buttontype())
+                return button.get_buttontype()
             
     def draw(self, surface):
         for button in self.buttons:
@@ -362,18 +382,27 @@ class Simulation:
                         self.subColor()
                 if self.colorPickers.pickers != []:
                     if event.key == pg.K_LEFT:
-                        self.colorPickers.count(-1)
+                        self.colorPickers.count(-1, True, ('shownvalue', 'count'))
                     if event.key == pg.K_RIGHT:
-                        self.colorPickers.count(+1)
+                        self.colorPickers.count(+1, True, ('shownvalue', 'count'))
             if event.type == pg.MOUSEBUTTONDOWN:
+                self.progress_buttons(self.buttons.get_buttontype())
                 self.put_or_update_glass()
                 self.colorPickers.color_pick()  # <-- Add this line
                 if hasattr(self.colorPickers, "_picked_color"):
                     self.picked_color = self.colorPickers._picked_color
                     del self.colorPickers._picked_color
                     self.coloring_mouse()
-
-                
+                    
+    def progress_buttons(self, buttontype):
+        if buttontype == "trash_bin":
+            for grid in self.grid.grids:
+                grid._is_full = False
+            self.glasses.clear()
+        elif buttontype == "unfill":
+            for glass in self.glasses:
+                glass.update_glass()
+                 
     def coloring_mouse(self, coloring: bool = True):
         if coloring:
             cursor_image = tone_change(
@@ -395,23 +424,23 @@ class Simulation:
                 else:
                     for glass in self.glasses:
                         if glass.rect.center == grid.rect.center and not glass._is_full and self.picked_color:
-                            print(self.picked_color)
                             glass.update_glass(fill=True, color= self.picked_color)
                             self.picked_color = None
                             self.coloring_mouse(False)
-                            self.update_counts()
                             
     def update_counts(self):
-        for glass in self.glasses:
-            if hasattr(glass, "color") and not glass.paid:
-                for colorpicker in self.colorPickers.pickers:
-                    if colorpicker.color == glass.color:
-                        colorpicker.count = max(0, colorpicker.count - 1)
-                        glass.paid = True
-                
-                    
+        for color_picker in self.colorPickers.pickers:
+            color_used = 0
+            for glass in self.glasses:
+                if hasattr(glass, 'color'):
+                    if color_picker.color == glass.color:
+                        color_used += 1
+            current = getattr(color_picker, 'count')
+            setattr(color_picker, 'shownvalue', current - color_used)
+                       
     def update(self):
         self.grid.update()
+        self.update_counts()
         self.buttons.update()
 
     def draw_objects(self):
