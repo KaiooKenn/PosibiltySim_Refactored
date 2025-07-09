@@ -2,7 +2,7 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import pygame as pg
-from random import randint
+from random import randint, choice
 import cv2
 import numpy as np
 
@@ -395,14 +395,38 @@ class Simulation:
                     self.coloring_mouse()
                     
     def progress_buttons(self, buttontype):
-        if buttontype == "trash_bin":
+        if buttontype is None:
+            return
+        if buttontype == 'trash_bin':
             for grid in self.grid.grids:
                 grid._is_full = False
             self.glasses.clear()
-        elif buttontype == "unfill":
+        elif buttontype == 'unfill':
             for glass in self.glasses:
                 glass.update_glass()
-                 
+                
+        elif 'random' in buttontype:
+            one_cycle = False
+            if buttontype == 'random_one':
+                one_cycle = True
+                
+            
+            usable_colors = sorted([picker for picker in self.colorPickers.pickers], key= lambda picker: picker.shownvalue > 0, reverse=True)
+            print([picker.shownvalue for picker in usable_colors])
+            if usable_colors:
+                for grid in self.grid.grids:
+                    if not grid._is_full and usable_colors:
+                        usable_colors = [usable_color for usable_color in usable_colors if usable_color.shownvalue > 0]
+                        grid._is_full = True
+                        self.glasses.append(Glass(grid))
+                        color = choice(usable_colors).color
+                        for usable_color in usable_colors:
+                            if usable_color.color == color:
+                                usable_color.shownvalue -= 1
+                        self.glasses[-1].update_glass(fill = True, color = color)
+                        if one_cycle:
+                            break
+                        
     def coloring_mouse(self, coloring: bool = True):
         if coloring:
             cursor_image = tone_change(
