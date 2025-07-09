@@ -1,0 +1,79 @@
+Based on your code, you have created an excellent interactive environment for setting up a probability
+  experiment. You can define a population (the counts of different colors) and draw samples from it (filling
+  the glasses).
+
+  To add the "information part," you should focus on visualizing the core concepts of probability that your
+  simulation demonstrates. Here are the mathematical graphics and displays you could design:
+
+  1. The Probability Display Panel
+
+
+  This would be a dedicated area on your screen (perhaps on the right side or top) that shows the core
+  numbers in real-time. It doesn't have to be a complex graph, just clear text.
+
+
+   * Theoretical Probability: For each color, calculate and display the probability based on the initial
+     counts you set.
+       * Formula: P(color) = (Initial count of that color) / (Total initial count of all colors)
+       * Example Display:
+           * P(Red): 0.50 (5/10)
+           * P(Blue): 0.50 (5/10)
+
+
+   * Experimental Probability: For each color, calculate and display the probability based on the glasses you
+     have filled so far. This will change as you fill more glasses.
+       * Formula: P(color) = (Number of glasses filled with that color) / (Total number of filled glasses)
+       * Example Display:
+           * Experimental P(Red): 0.45 (9/20)
+           * Experimental P(Blue): 0.55 (11/20)
+
+
+  2. The Bar Chart: Theoretical vs. Experimental
+
+  A bar chart is a fantastic way to visually compare the expected results with the actual results.
+
+
+   * Design: For each color, you would have two bars side-by-side:
+       1. A bar representing the theoretical probability. This bar's height is fixed once you set the initial
+          counts.
+       2. A bar representing the experimental probability. This bar's height will grow and shrink as you fill
+          more glasses.
+   * What it Shows: The user can immediately see the difference between what should happen and what is
+     happening.
+
+
+  3. The Line Graph: The Law of Large Numbers
+
+  This is the most powerful and educational graphic you can add. It perfectly demonstrates the Law of Large
+  Numbers, which states that as the number of trials (filled glasses) increases, the experimental
+  probability will get closer and closer to the theoretical probability.
+
+
+   * Design:
+       * X-Axis: Number of Trials (Total number of glasses filled).
+       * Y-Axis: Probability (from 0.0 to 1.0).
+       * Lines:
+           1. For a chosen color (e.g., Red), draw a straight horizontal line at its theoretical probability
+              (e.g., at Y=0.5). This line doesn't move.
+           2. Draw another fluctuating line that plots the experimental probability of that color at each
+              trial. After the 1st glass, the 2nd, the 3rd, and so on.
+   * What it Shows: The user will see the experimental line jump around wildly at first, but as they fill more
+      and more glasses, they will see it stabilize and converge towards the straight line of the theoretical
+     probability. This is the core of many probability simulations.
+
+
+  What to Do (Your Plan):
+
+
+   1. Choose a Library: Your code already imports matplotlib.pyplot. This is the perfect tool for creating
+      these graphs.
+   2. Integrate Matplotlib with Pygame: You cannot directly show a Matplotlib plot in Pygame. The standard
+      method is:
+       * Create your plot (bar chart or line graph) using Matplotlib.
+       * Instead of showing it (plt.show()), save it to an in-memory buffer (like io.BytesIO).
+       * Load that buffer as an image into a Pygame surface (pygame.image.load).
+       * Draw (blit) that surface onto your main game screen.
+   3. Start Simple: Begin by implementing the text-based Probability Display Panel. It's the easiest to code
+      and provides the essential data needed for the other graphs.
+   4. Implement the Graphs: Once the text display is working, use that data to generate the bar and line
+      charts. The line chart will be the most impressive addition.
