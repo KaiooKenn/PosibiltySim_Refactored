@@ -5,6 +5,7 @@ import pygame as pg
 from random import randint, choice
 import cv2
 import numpy as np
+import json
 
 pg.init()
 Info_Object = pg.display.Info()
@@ -265,6 +266,7 @@ class ColorPickers:
     def addPicker(self):
         if len(self.colors) == len(self.pickers):
             raise Exception(f"all_colors value doesn't equal to pickers value \n {len(self.colors) = } \n {len(self.pickers) = }")
+        counts = [(picker.count, picker.shownvalue) for picker in self.pickers]
         self.pickers.clear()
         picker_count = len(self.colors)
         if picker_count == 0:
@@ -273,6 +275,12 @@ class ColorPickers:
         for i, color in enumerate(self.colors):
             self.pickers.append(ColorPicker(color, (picker_width * i, DISPLAY_HEIGHT), 
                                             pg.Surface((picker_width, PICKER_BLANK))))
+            
+        
+            if counts and i != picker_count - 1:
+                count, shownvalue = counts[i]
+                self.pickers[-1].count = count
+                self.pickers[-1].shownvalue = shownvalue
             
     def subPicker(self):
         self.pickers.pop()
@@ -310,7 +318,6 @@ class Button:
         if self.rect.collidepoint(pg.mouse.get_pos()):
             return self.buttontype
         return False
-            
             
     def draw(self, surface):
         pg.draw.rect(surface, self.color, self.rect, border_radius=8)
@@ -357,6 +364,9 @@ class Simulation:
         self.buttons = Buttons()
         self.glasses = []
         
+        with open('colorValues.json', 'r', encoding='utf-8') as f:
+            self.named_colors = json.load(f)
+        
     def subColor(self):
         for glass in self.glasses:
             if hasattr(glass, "color"):
@@ -388,7 +398,7 @@ class Simulation:
             if event.type == pg.MOUSEBUTTONDOWN:
                 self.progress_buttons(self.buttons.get_buttontype())
                 self.put_or_update_glass()
-                self.colorPickers.color_pick()  # <-- Add this line
+                self.colorPickers.color_pick()
                 if hasattr(self.colorPickers, "_picked_color"):
                     self.picked_color = self.colorPickers._picked_color
                     del self.colorPickers._picked_color
@@ -410,23 +420,129 @@ class Simulation:
             if buttontype == 'random_one':
                 one_cycle = True
                 
+            self.handle_random_buttons(one_cycle)
             
-            usable_colors = sorted([picker for picker in self.colorPickers.pickers], key= lambda picker: picker.shownvalue > 0, reverse=True)
-            print([picker.shownvalue for picker in usable_colors])
-            if usable_colors:
-                for grid in self.grid.grids:
-                    if not grid._is_full and usable_colors:
-                        usable_colors = [usable_color for usable_color in usable_colors if usable_color.shownvalue > 0]
-                        grid._is_full = True
-                        self.glasses.append(Glass(grid))
-                        color = choice(usable_colors).color
-                        for usable_color in usable_colors:
-                            if usable_color.color == color:
-                                usable_color.shownvalue -= 1
-                        self.glasses[-1].update_glass(fill = True, color = color)
-                        if one_cycle:
-                            break
-                        
+        elif buttontype == 'graphic0':
+            self.handle_graphic_buttons(False)
+            
+        elif buttontype == 'graphic1':
+            self.handle_graphic_buttons(True)
+            
+        else:
+            raise Exception("There is no buttontype for this")
+        
+    @staticmethod
+    def calculate_distance(rgb1, rgb2):
+        r1, g1, b1 = rgb1
+        r2, g2, b2 = rgb2
+        return (r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2
+        
+    def name_colors(self, rgb1):
+        min_distance = float('inf')
+        name = None
+        for color in self.named_colors:
+            rgb2 = color['rgb']
+            distance = self.calculate_distance(rgb1, rgb2)
+            
+            if distance < min_distance:
+                min_distance = distance
+                name = color['name']
+                
+                if distance == 0:
+                    break
+        return name
+        
+    def handle_graphic_buttons(self, bar):
+        # Theoretical probability is based on the total number of items available.
+        total_theoretical_count = sum(picker.count for picker in self.colorPickers.pickers)
+
+        # Experimental probability is based on the items that have been "used" or "drawn".
+        items_drawn = [picker.count - picker.shownvalue for picker in self.colorPickers.pickers]
+        total_experimental_count = sum(items_drawn)
+
+        fig, ax = plt.subplots()
+
+        labels = []
+        theoretical_values = []
+        experimental_values = []
+        for i, picker in enumerate(self.colorPickers.pickers):
+            if picker.count > 0:
+                labels.append(self.name_colors(picker.color).upper())
+                # Calculate theoretical probability
+                if total_theoretical_count > 0:
+                    theoretical_values.append(picker.count / total_theoretical_count)
+                else:
+                    theoretical_values.append(0)
+                # Calculate experimental probability
+                if total_experimental_count > 0:
+                    experimental_values.append(items_drawn[i] / total_experimental_count)
+                else:
+                    experimental_values.append(0)
+        if bar:
+
+            # This part creates the bar chart.
+            x = np.arange(len(labels))
+            width = 0.35  # the width of the bars
+
+            rects1 = ax.bar(x - width/2, theoretical_values, width, label='Teorik', color= 'maroon')
+            rects2 = ax.bar(x + width/2, experimental_values, width, label='Deneysel', color = 'cornflowerblue')
+
+            ax.set_ylabel('Probability')
+            ax.set_title('Theoretical vs. Experimental Probability')
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=45, ha="right")
+            ax.legend()
+
+            fig.tight_layout()
+            plt.show()
+            
+        else:
+            average_theoretical = sum(theoretical_values)/ len(theoretical_values)
+            y_values = []
+            x_values = [] # how many glasses are calculated
+            for i in range(len(experimental_values)):
+                if i == 0:
+                    x_values.append(items_drawn[i])
+                    y_values.append(experimental_values[i])
+                else:
+                    x_values.append(items_drawn[i] + x_values[i - 1])
+                    y_values.append((experimental_values[i] + experimental_values[i - 1])/ i + 1)
+            
+            ax.axhline(y = average_theoretical, color= 'maroon', label = "Teorik")
+            ax.plot(x_values, y_values,
+                    color = "cornflowerblue",
+                    linestyle = "--",
+                    marker = "*",
+                    markersize = 15,
+                    label = "Deneysel")              
+            ax.set_title("Büyük Sayılar Yasası")
+            ax.set_ylabel("Olasılık")
+            ax.set_xlabel("Doldurulmuş Bardaklar")
+            
+            ax.legend()
+            
+            plt.show()
+            
+                     
+    def handle_random_buttons(self, onecycle):
+        usable_colors = sorted([picker for picker in self.colorPickers.pickers], key= lambda picker: picker.shownvalue, reverse=True)
+        print([picker.shownvalue for picker in usable_colors])
+        if usable_colors:
+            for grid in self.grid.grids:
+                if not grid._is_full:
+                    usable_colors = [usable_color for usable_color in usable_colors if usable_color.shownvalue > 0]
+                    if not usable_colors:
+                        return
+                    grid._is_full = True
+                    self.glasses.append(Glass(grid))
+                    color = choice(usable_colors).color
+                    for usable_color in usable_colors:
+                        if usable_color.color == color:
+                            usable_color.shownvalue -= 1
+                    self.glasses[-1].update_glass(fill = True, color = color)
+                    if onecycle:
+                        break
+                    
     def coloring_mouse(self, coloring: bool = True):
         if coloring:
             cursor_image = tone_change(
