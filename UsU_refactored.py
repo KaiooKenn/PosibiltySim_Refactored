@@ -467,31 +467,41 @@ class Simulation:
         return (r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2
     
     def randomize_pickers(self, adding_color = False):
-        if not self.glasses:
+        if (not self.glasses and adding_color) or (not self.colorPickers.pickers and not adding_color):
             return
-        glass_count = len(self.glasses)
-        print(glass_count)
         for button in self.buttons.buttons:
-            if 'rand_add' in button.buttontype:
+            if adding_color and button.buttontype == 'rand_add_picker':
                 picker_count = button.count
-                if button.buttontype == 'rand_add_picker':
-                    adding_color = True
+                add_count = len(self.glasses)
+                break
+                
+            elif not adding_color and button.buttontype == 'rand_add_plus':
+                picker_count = len(self.colorPickers.pickers)
+                add_count = button.count
+                break
 
+        new_values = [0 for _ in range(picker_count)]
+        x=0
+        for _ in range(add_count):
+            x+=1
+            idx = randint(0, picker_count - 1)
+            new_values[idx] += 1
+            
+        print(f'new_values, {x} kez tetiklendi')
         if adding_color:
             self.all_colors.clear()
             for _ in range(picker_count):
                 self.all_colors.append(self.colorPickers.create_random_color(self.all_colors))
 
             self.colorPickers.pickers.clear()
-            new_values = [0 for _ in range(picker_count)]
-            for _ in range(glass_count):
-                idx = randint(0, picker_count - 1)
-                new_values[idx] += 1
 
             self.colorPickers.addPicker()
             
         for i in range(picker_count):
-            self.colorPickers.pickers[i].count = new_values[i]
+            if adding_color:
+                self.colorPickers.pickers[i].count = new_values[i]
+            else:
+                self.colorPickers.pickers[i].count = new_values[i] + self.colorPickers.pickers[i].count
             
     def name_colors(self, rgb1):
         min_distance = float('inf')
@@ -516,74 +526,91 @@ class Simulation:
         items_drawn = [picker.count - picker.shownvalue for picker in self.colorPickers.pickers]
         total_experimental_count = sum(items_drawn)
 
-        fig, ax = plt.subplots()
-
         labels = []
         theoretical_values = []
         experimental_values = []
+        valid_pickers = []
         for i, picker in enumerate(self.colorPickers.pickers):
             if picker.count > 0:
                 labels.append(self.name_colors(picker.color).upper())
-                # Calculate theoretical probability
+                valid_pickers.append(picker)
                 if total_theoretical_count > 0:
                     theoretical_values.append(picker.count / total_theoretical_count)
                 else:
                     theoretical_values.append(0)
-                # Calculate experimental probability
                 if total_experimental_count > 0:
                     experimental_values.append(items_drawn[i] / total_experimental_count)
                 else:
                     experimental_values.append(0)
+        
         if bar:
-
-            # This part creates the bar chart.
+            fig, ax = plt.subplots()
             x = np.arange(len(labels))
-            width = 0.35  # the width of the bars
-
-            rects1 = ax.bar(x - width/2, theoretical_values, width, label='Teorik', color= 'maroon')
-            rects2 = ax.bar(x + width/2, experimental_values, width, label='Deneysel', color = 'cornflowerblue')
-
-            ax.set_ylabel('Probability')
-            ax.set_title('Theoretical vs. Experimental Probability')
+            width = 0.35
+            ax.bar(x - width/2, theoretical_values, width, label='Teorik', color='maroon')
+            ax.bar(x + width/2, experimental_values, width, label='Deneysel', color='cornflowerblue')
+            ax.set_ylabel('Olasılık')
+            ax.set_title('Teorik ve Deneysel Olasılıkların Karşılaştırması')
             ax.set_xticks(x)
             ax.set_xticklabels(labels, rotation=45, ha="right")
             ax.legend()
-
             fig.tight_layout()
             plt.show()
             
         else:
-            if not experimental_values or not theoretical_values:
+            # Law of Large Numbers: Plotting the convergence of the *Mean Absolute Error* to zero.
+            # This provides a single, clear line representing the system's overall convergence.
+            fig, ax = plt.subplots(figsize=(10, 6))
+
+            filled_colors = [glass.color for glass in self.glasses if hasattr(glass, 'color')]
+
+            if not valid_pickers or not filled_colors:
+                ax.set_title("Büyük Sayılar Yasası (Veri Yok veya Bardak Doldurulmamış)")
+                ax.set_xlabel("Deneme Sayısı")
+                ax.set_ylabel("Ortalama Mutlak Hata")
                 plt.show()
                 return
 
-            average_theoretical = sum(theoretical_values) / len(theoretical_values)
-            y_values = []
-            x_values = []  # Represents the cumulative number of glasses drawn
-            
-            # Calculate cumulative sums for x and y values
-            cumulative_drawn_count = 0
-            for i in range(len(experimental_values)):
-                cumulative_drawn_count += items_drawn[i]
-                x_values.append(cumulative_drawn_count)
-                
-                # Calculate the running average of the experimental probabilities
-                running_avg = sum(experimental_values[:i+1]) / (i + 1)
-                y_values.append(running_avg)
+            # The goal is for the single line to converge to this zero line.
+            ax.axhline(y=0, color='black', linestyle='--', lw=1.5, label='Sıfır Hata (Mükemmel Uyum)')
 
-            ax.axhline(y=average_theoretical, color='maroon', label="Teorik")
-            ax.plot(x_values, y_values,
-                    color = "cornflowerblue",
-                    linestyle = "--",
-                    marker = "*",
-                    markersize = 15,
-                    label = "Deneysel")              
-            ax.set_title("Büyük Sayılar Yasası")
-            ax.set_ylabel("Olasılık")
-            ax.set_xlabel("Doldurulmuş Bardaklar")
-            
+            x_values = []
+            y_values_avg_error = []
+
+            # Pre-calculate color-to-theoretical-prob mapping for efficiency
+            prob_map = {picker.color: theoretical_values[i] for i, picker in enumerate(valid_pickers)}
+            picker_colors = list(prob_map.keys())
+
+            for i in range(len(filled_colors)):
+                trial_number = i + 1
+                current_trial_colors = filled_colors[:trial_number]
+                total_abs_error = 0
+
+                for color_to_check in picker_colors:
+                    theoretical_prob = prob_map[color_to_check]
+                    
+                    # Calculate experimental probability for this color at this trial
+                    experimental_count = current_trial_colors.count(color_to_check)
+                    experimental_prob = experimental_count / trial_number
+                    
+                    # Add the absolute error to the total
+                    total_abs_error += abs(experimental_prob - theoretical_prob)
+                
+                # Calculate the Mean Absolute Error for this trial
+                mean_abs_error = total_abs_error / len(valid_pickers)
+                
+                x_values.append(trial_number)
+                y_values_avg_error.append(mean_abs_error)
+
+            # Plot the single line representing the average error
+            ax.plot(x_values, y_values_avg_error, color="#007ACC", linestyle='-', marker='o', markersize=3, label="Ortalama Hata")
+
+            ax.set_title("Ortalama Olasılık Hatasının Sıfıra Yakınsaması")
+            ax.set_ylabel("|Deneysel - Teorik| Ortalaması")
+            ax.set_xlabel("Deneme Sayısı (Doldurulan Bardak)")
+            ax.grid(True, linestyle='--', alpha=0.6)
             ax.legend()
-            
+            fig.tight_layout()
             plt.show()
             
                      
@@ -643,10 +670,17 @@ class Simulation:
                         color_used += 1
             current = getattr(color_picker, 'count')
             setattr(color_picker, 'shownvalue', current - color_used)
+            
+    def update_glasses(self):
+        for glass in self.glasses:
+            if hasattr(glass, "color"):
+                if not glass.color in self.all_colors:
+                    glass.update_glass(fill= False) 
                        
     def update(self):
         self.grid.update()
         self.update_counts()
+        self.update_glasses()
         self.buttons.update()
 
     def draw_objects(self):
