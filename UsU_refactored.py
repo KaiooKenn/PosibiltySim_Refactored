@@ -2,14 +2,18 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import pygame as pg
-from random import randint
+from random import randint, choice
 import cv2
 import numpy as np
+import json
 
 pg.init()
 Info_Object = pg.display.Info()
+
+SCREEN_WIDTH, SCREEN_HEIGHT = (Info_Object.current_w) * 4 // 5, (Info_Object.current_h) * 4 // 5
+BUTTON_HUD = 50
 PICKER_BLANK = 30
-SCREEN_WIDTH, SCREEN_HEIGHT = (Info_Object.current_w) * 4 // 5, (Info_Object.current_h - PICKER_BLANK) * 4 // 5
+DISPLAY_WIDTH, DISPLAY_HEIGHT = (SCREEN_WIDTH - BUTTON_HUD), (SCREEN_HEIGHT - PICKER_BLANK)
 FPS = 30
 
 '''
@@ -107,8 +111,8 @@ class Grid:
         super().__init__()
         self.divide_x, self.divide_y = 1, 1
 
-        self.cell_width = (SCREEN_WIDTH//self.divide_x)
-        self.cell_height = (SCREEN_HEIGHT//self.divide_y)
+        self.cell_width = (DISPLAY_WIDTH//self.divide_x)
+        self.cell_height = (DISPLAY_HEIGHT//self.divide_y)
 
         self.grids = []
         self.grids.append(GridCell((0, 0), self.cell_width, self.cell_height))
@@ -118,18 +122,18 @@ class Grid:
             grid.highlight()
 
     def multiply(self):
-        if (SCREEN_WIDTH//self.divide_x) >= (SCREEN_HEIGHT//self.divide_y):
+        if (DISPLAY_WIDTH//self.divide_x) >= (DISPLAY_HEIGHT//self.divide_y):
             self.divide_x += 1
         else:
             self.divide_y += 1
 
-        self.cell_width = (SCREEN_WIDTH//self.divide_x)
-        self.cell_height = (SCREEN_HEIGHT//self.divide_y)
+        self.cell_width = (DISPLAY_WIDTH//self.divide_x)
+        self.cell_height = (DISPLAY_HEIGHT//self.divide_y)
         
         self.grids.clear()
         for x in range(self.divide_x):
             for y in range(self.divide_y):
-                grid_coord = (SCREEN_WIDTH//self.divide_x)*x, (SCREEN_HEIGHT//self.divide_y)*y
+                grid_coord = (DISPLAY_WIDTH//self.divide_x)*x, (DISPLAY_HEIGHT//self.divide_y)*y
                 self.grids.append(GridCell(grid_coord, self.cell_width, self.cell_height))
 
 
@@ -158,6 +162,8 @@ class Glass:
             self.size = min(self.grid.rect.width, self.grid.rect.height)
         except AttributeError as e:
             print(f"error: {e}")
+        if hasattr(self, 'color'):
+            del self.color
         if not fill:
             self.image = pg.image.load(resource_path("graphics/glass.png")).convert_alpha()
             self.image = pg.transform.scale(self.image, (self.size, self.size))
@@ -177,6 +183,7 @@ class ColorPicker:
         self.surface = surface
         self.rect = surface.get_rect(topleft= coordinate)
         self.count = 0
+        self.shownvalue = 0
         self.font = pg.font.Font(None, 30)
         self.font.set_italic(True)
         self.text_color = self.get_font_color(self.color)
@@ -198,11 +205,16 @@ class ColorPicker:
         # Return black if brightness is high, else white
         return (0, 0, 0) if brightness > 128 else (255, 255, 255)
     
-    def add_or_sub_count(self, value):
-        if self.check_mouse():
-            self.count = max(0, self.count + value)
-
-        
+    def add_or_sub_count(self, value, need_mouse, *attrs): # TODO: if you don't need to then get rid of `need_mouse`
+        if need_mouse and not self.check_mouse():
+            return  # Only update if mouse is over this picker
+        for attr in attrs:
+            try:
+                current = getattr(self, attr)
+                setattr(self, attr, max(0, current + value))
+            except Exception:
+                raise Exception(f"There is no {attr} in self.attrs")  #
+            
     def check_mouse(self):
         if self.rect.collidepoint(pg.mouse.get_pos()):
             return True
@@ -210,9 +222,8 @@ class ColorPicker:
         
     def draw(self, surface):
         pg.draw.rect(surface, self.color, self.rect, border_radius=8)
-        self.text = self.font.render(str(int(self.count)), True, self.text_color)
+        self.text = self.font.render(str(int(self.shownvalue)), True, self.text_color)
         surface.blit(self.text, self.text.get_rect(center= self.rect.center))
-        
         
         
 class ColorPickers:
@@ -248,29 +259,35 @@ class ColorPickers:
                 attempts = 0
         return random_color
     
-    def count(self, value):
+    def count(self, value, need_mouse, attrs):
         for picker in self.pickers:
-            picker.add_or_sub_count(value)
+            picker.add_or_sub_count(value, need_mouse, *attrs)  # Unpack attrs here
     
     def addPicker(self):
         if len(self.colors) == len(self.pickers):
             raise Exception(f"all_colors value doesn't equal to pickers value \n {len(self.colors) = } \n {len(self.pickers) = }")
+        counts = [(picker.count, picker.shownvalue) for picker in self.pickers]
         self.pickers.clear()
         picker_count = len(self.colors)
         if picker_count == 0:
             return
-        picker_width = SCREEN_WIDTH // picker_count
+        picker_width = DISPLAY_WIDTH // picker_count
         for i, color in enumerate(self.colors):
-            self.pickers.append(ColorPicker(color, (picker_width * i, SCREEN_HEIGHT), 
+            self.pickers.append(ColorPicker(color, (picker_width * i, DISPLAY_HEIGHT), 
                                             pg.Surface((picker_width, PICKER_BLANK))))
+            
+        
+            if counts and i != picker_count - 1:
+                count, shownvalue = counts[i]
+                self.pickers[-1].count = count
+                self.pickers[-1].shownvalue = shownvalue
             
     def subPicker(self):
         self.pickers.pop()
         
-        
     def color_pick(self):
         for picker in self.pickers:
-            if picker.check_mouse() and picker.count > 0:
+            if picker.check_mouse() and picker.shownvalue > 0:
                 if not hasattr(self, "_picked_color"):
                     self._picked_color = picker.color
             
@@ -278,11 +295,75 @@ class ColorPickers:
         if self.pickers != []:        
             for picker in self.pickers:
                 picker.draw(surface)
-            
+             
+class Button:
+    def __init__(self, surface, coordinate, buttontype = "trash_bin"):
+        self.surface = surface
+        self.rect = self.surface.get_rect(topleft = coordinate)
+        self.color = 'azure2'
+        self.buttontype = buttontype
+        if 'rand_add' in self.buttontype:
+            self.font = pg.font.Font(None, 30)
+            self.font.set_italic(True)
+            self.count = 1
+        try:
+            self.icon = pg.transform.scale(pg.image.load(f"graphics/icons/{self.buttontype}.png"),
+                                        (BUTTON_HUD, BUTTON_HUD))
+        except:
+            raise(f"Aranan nesne bulunamadı \n {buttontype}")
         
+    def highlight(self):
+        if self.rect.collidepoint(pg.mouse.get_pos()):
+            self.color = 'azure3'
+        else:
+            self.color = 'azure2'
+            
+    def get_buttontype(self):
+        if self.rect.collidepoint(pg.mouse.get_pos()):
+            return self.buttontype
+        return False
+    
+    def changeValue(self, value = 1):
+        if not 'rand_add' in self.buttontype or not self.rect.collidepoint(pg.mouse.get_pos()):
+            return
+        self.count = max(1, self.count + value)
+        
+    def draw(self, surface):
+        pg.draw.rect(surface, self.color, self.rect, border_radius=8)
+        surface.blit(self.icon, self.icon.get_rect(center = self.rect.center))
+        if hasattr(self, "count"):
+            self.text = self.font.render(str(int(self.count)), True, 'black')
+            surface.blit(self.text, self.text.get_rect(center= self.rect.center))
+            
+class Buttons:
+    def __init__(self):
+        buttontypes = ["put_glasses", "trash_bin", "unfill", "random_one",
+                       "random_all", "rand_add_picker", "rand_add_plus", "graphic0", "graphic1"]
+        self.button_count = len(buttontypes)
+        surface = pg.Surface((BUTTON_HUD, SCREEN_HEIGHT//self.button_count))
+        coordinates = []
+        for a in range(self.button_count):
+            coordinate = (DISPLAY_WIDTH, (SCREEN_HEIGHT//self.button_count)*a)
+            coordinates.append(coordinate)
+        self.buttons = [Button(surface, coordinates[a], buttontype=buttontypes[a]) for a in range(self.button_count)]
+            
+    def update(self):
+        for button in self.buttons:
+            button.highlight()
+    
+    def get_buttontype(self):
+        for button in self.buttons:
+            if button.get_buttontype():
+                print(button.get_buttontype())
+                return button.get_buttontype()
+            
+    def draw(self, surface):
+        for button in self.buttons:
+            button.draw(surface)
+            
 class Simulation:
     def __init__(self):
-        self.screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT + PICKER_BLANK))
+        self.screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.clock = pg.time.Clock()
         self.running = True
         self.all_colors = []
@@ -292,7 +373,11 @@ class Simulation:
         self.picked_color = None
         self.colorPickers = ColorPickers(self.all_colors)
         self.grid = Grid()
+        self.buttons = Buttons()
         self.glasses = []
+        
+        with open('colorValues.json', 'r', encoding='utf-8') as f:
+            self.named_colors = json.load(f)
         
     def subColor(self):
         for glass in self.glasses:
@@ -317,20 +402,240 @@ class Simulation:
                 if event.key == pg.K_DOWN:
                     if self.colorPickers.pickers != []:
                         self.subColor()
-                if self.colorPickers.pickers != []:
-                    if event.key == pg.K_LEFT:
-                        self.colorPickers.count(-1)
-                    if event.key == pg.K_RIGHT:
-                        self.colorPickers.count(+1)
+                if event.key == pg.K_LEFT:
+                    if self.colorPickers: self.colorPickers.count(-1, True, ('shownvalue', 'count'))
+                    for button in self.buttons.buttons:
+                        button.changeValue(-1)
+                if event.key == pg.K_RIGHT:
+                    if self.colorPickers: self.colorPickers.count(+1, True, ('shownvalue', 'count'))
+                    for button in self.buttons.buttons:
+                        button.changeValue()
             if event.type == pg.MOUSEBUTTONDOWN:
+                self.progress_buttons(self.buttons.get_buttontype())
                 self.put_or_update_glass()
-                self.colorPickers.color_pick()  # <-- Add this line
+                self.colorPickers.color_pick()
                 if hasattr(self.colorPickers, "_picked_color"):
                     self.picked_color = self.colorPickers._picked_color
                     del self.colorPickers._picked_color
                     self.coloring_mouse()
-
+                    
+    def progress_buttons(self, buttontype):
+        if buttontype is None:
+            return
+        
+        if buttontype == 'put_glasses':
+            for grid in self.grid.grids:
+                if grid._is_full == False:
+                    grid._is_full = True
+                    self.glasses.append(Glass(grid))
+        elif buttontype == 'trash_bin':
+            for grid in self.grid.grids:
+                grid._is_full = False
+            self.glasses.clear()
+            
+        elif buttontype == 'unfill':
+            for glass in self.glasses:
+                glass.update_glass()
                 
+        elif 'random' in buttontype:
+            one_cycle = False
+            if buttontype == 'random_one':
+                one_cycle = True
+                
+            self.handle_random_buttons(one_cycle)
+        
+        elif buttontype == 'rand_add_picker':
+            self.randomize_pickers(True)
+        
+        elif buttontype == 'rand_add_plus':
+            self.randomize_pickers()    
+            
+        elif buttontype == 'graphic0':
+            self.handle_graphic_buttons(False)
+            
+        elif buttontype == 'graphic1':
+            self.handle_graphic_buttons(True)
+            
+            
+        else:
+            raise Exception("There is no buttontype for this")
+        
+    @staticmethod
+    def calculate_distance(rgb1, rgb2):
+        r1, g1, b1 = rgb1
+        r2, g2, b2 = rgb2
+        return (r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2
+    
+    def randomize_pickers(self, adding_color = False):
+        if (not self.glasses and adding_color) or (not self.colorPickers.pickers and not adding_color):
+            return
+        for button in self.buttons.buttons:
+            if adding_color and button.buttontype == 'rand_add_picker':
+                picker_count = button.count
+                add_count = len(self.glasses)
+                break
+                
+            elif not adding_color and button.buttontype == 'rand_add_plus':
+                picker_count = len(self.colorPickers.pickers)
+                add_count = button.count
+                break
+
+        new_values = [0 for _ in range(picker_count)]
+        x=0
+        for _ in range(add_count):
+            x+=1
+            idx = randint(0, picker_count - 1)
+            new_values[idx] += 1
+            
+        print(f'new_values, {x} kez tetiklendi')
+        if adding_color:
+            self.all_colors.clear()
+            for _ in range(picker_count):
+                self.all_colors.append(self.colorPickers.create_random_color(self.all_colors))
+
+            self.colorPickers.pickers.clear()
+
+            self.colorPickers.addPicker()
+            
+        for i in range(picker_count):
+            if adding_color:
+                self.colorPickers.pickers[i].count = new_values[i]
+            else:
+                self.colorPickers.pickers[i].count = new_values[i] + self.colorPickers.pickers[i].count
+            
+    def name_colors(self, rgb1):
+        min_distance = float('inf')
+        name = None
+        for color in self.named_colors:
+            rgb2 = color['rgb']
+            distance = self.calculate_distance(rgb1, rgb2)
+            
+            if distance < min_distance:
+                min_distance = distance
+                name = color['name']
+                
+                if distance == 0:
+                    break
+        return name
+        
+    def handle_graphic_buttons(self, bar):
+        # Theoretical probability is based on the total number of items available.
+        total_theoretical_count = sum(picker.count for picker in self.colorPickers.pickers)
+
+        # Experimental probability is based on the items that have been "used" or "drawn".
+        items_drawn = [picker.count - picker.shownvalue for picker in self.colorPickers.pickers]
+        total_experimental_count = sum(items_drawn)
+
+        labels = []
+        theoretical_values = []
+        experimental_values = []
+        valid_pickers = []
+        for i, picker in enumerate(self.colorPickers.pickers):
+            if picker.count > 0:
+                labels.append(self.name_colors(picker.color).upper())
+                valid_pickers.append(picker)
+                if total_theoretical_count > 0:
+                    theoretical_values.append(picker.count / total_theoretical_count)
+                else:
+                    theoretical_values.append(0)
+                if total_experimental_count > 0:
+                    experimental_values.append(items_drawn[i] / total_experimental_count)
+                else:
+                    experimental_values.append(0)
+        
+        if bar:
+            fig, ax = plt.subplots()
+            x = np.arange(len(labels))
+            width = 0.35
+            ax.bar(x - width/2, theoretical_values, width, label='Teorik', color='maroon')
+            ax.bar(x + width/2, experimental_values, width, label='Deneysel', color='cornflowerblue')
+            ax.set_ylabel('Olasılık')
+            ax.set_title('Teorik ve Deneysel Olasılıkların Karşılaştırması')
+            ax.set_xticks(x)
+            ax.set_xticklabels(labels, rotation=45, ha="right")
+            ax.legend()
+            fig.tight_layout()
+            plt.show()
+            
+        else:
+            # Law of Large Numbers: Plotting the convergence of the *Mean Absolute Error* to zero.
+            # This provides a single, clear line representing the system's overall convergence.
+            fig, ax = plt.subplots(figsize=(10, 6))
+
+            filled_colors = [glass.color for glass in self.glasses if hasattr(glass, 'color')]
+
+            if not valid_pickers or not filled_colors:
+                ax.set_title("Büyük Sayılar Yasası (Veri Yok veya Bardak Doldurulmamış)")
+                ax.set_xlabel("Deneme Sayısı")
+                ax.set_ylabel("Ortalama Mutlak Hata")
+                plt.show()
+                return
+
+            # The goal is for the single line to converge to this zero line.
+            ax.axhline(y=0, color='black', linestyle='--', lw=1.5, label='Sıfır Hata (Mükemmel Uyum)')
+
+            x_values = []
+            y_values_avg_error = []
+
+            # Pre-calculate color-to-theoretical-prob mapping for efficiency
+            prob_map = {picker.color: theoretical_values[i] for i, picker in enumerate(valid_pickers)}
+            picker_colors = list(prob_map.keys())
+
+            for i in range(len(filled_colors)):
+                trial_number = i + 1
+                current_trial_colors = filled_colors[:trial_number]
+                total_abs_error = 0
+
+                for color_to_check in picker_colors:
+                    theoretical_prob = prob_map[color_to_check]
+                    
+                    # Calculate experimental probability for this color at this trial
+                    experimental_count = current_trial_colors.count(color_to_check)
+                    experimental_prob = experimental_count / trial_number
+                    
+                    # Add the absolute error to the total
+                    total_abs_error += abs(experimental_prob - theoretical_prob)
+                
+                # Calculate the Mean Absolute Error for this trial
+                mean_abs_error = total_abs_error / len(valid_pickers)
+                
+                x_values.append(trial_number)
+                y_values_avg_error.append(mean_abs_error)
+
+            # Plot the single line representing the average error
+            ax.plot(x_values, y_values_avg_error, color="#007ACC", linestyle='-', marker='o', markersize=3, label="Ortalama Hata")
+
+            ax.set_title("Ortalama Olasılık Hatasının Sıfıra Yakınsaması")
+            ax.set_ylabel("|Deneysel - Teorik| Ortalaması")
+            ax.set_xlabel("Deneme Sayısı (Doldurulan Bardak)")
+            ax.grid(True, linestyle='--', alpha=0.6)
+            ax.legend()
+            fig.tight_layout()
+            plt.show()
+            
+                     
+    def handle_random_buttons(self, onecycle):
+        usable_colors = sorted([picker for picker in self.colorPickers.pickers], key= lambda picker: picker.shownvalue, reverse=True)
+        if usable_colors:
+            for grid in self.grid.grids:
+                usable_colors = [usable_color for usable_color in usable_colors if usable_color.shownvalue > 0]
+                print([picker.shownvalue for picker in usable_colors])
+                if not usable_colors:
+                    return
+                color = choice(usable_colors).color
+                if not grid._is_full and onecycle:
+                    grid._is_full = True
+                    self.glasses.append(Glass(grid))
+                    self.glasses[-1].update_glass(fill = True, color = color)
+                    break
+                elif not onecycle:
+                    for usable_color in usable_colors:
+                        if usable_color.color == color:
+                            usable_color.shownvalue -= 1
+                    for glass in self.glasses:
+                        if glass.rect.center == grid.rect.center:
+                            glass.update_glass(fill = True, color = color)
+                    
     def coloring_mouse(self, coloring: bool = True):
         if coloring:
             cursor_image = tone_change(
@@ -352,36 +657,45 @@ class Simulation:
                 else:
                     for glass in self.glasses:
                         if glass.rect.center == grid.rect.center and not glass._is_full and self.picked_color:
-                            print(self.picked_color)
                             glass.update_glass(fill=True, color= self.picked_color)
                             self.picked_color = None
                             self.coloring_mouse(False)
-                            self.update_counts()
                             
     def update_counts(self):
+        for color_picker in self.colorPickers.pickers:
+            color_used = 0
+            for glass in self.glasses:
+                if hasattr(glass, 'color'):
+                    if color_picker.color == glass.color:
+                        color_used += 1
+            current = getattr(color_picker, 'count')
+            setattr(color_picker, 'shownvalue', current - color_used)
+            
+    def update_glasses(self):
         for glass in self.glasses:
-            if hasattr(glass, "color") and not glass.paid:
-                for colorpicker in self.colorPickers.pickers:
-                    if colorpicker.color == glass.color:
-                        colorpicker.count = max(0, colorpicker.count - 1)
-                        glass.paid = True
-                
-                    
+            if hasattr(glass, "color"):
+                if not glass.color in self.all_colors:
+                    glass.update_glass(fill= False) 
+                       
     def update(self):
         self.grid.update()
+        self.update_counts()
+        self.update_glasses()
+        self.buttons.update()
 
     def draw_objects(self):
         self.grid.draw(self.screen)
         for glass in self.glasses:
             glass.draw(self.screen)
         self.colorPickers.draw(self.screen)
+        self.buttons.draw(self.screen)
         
 
     def run(self):
         while self.running:
             self.handle_events()
             self.update()
-
+            
             # First, clear the screen from the last frame
             self.screen.fill("blue") # Or any background color
 
