@@ -2,7 +2,7 @@ import sys
 import os
 import matplotlib.pyplot as plt
 import pygame as pg
-from random import randint, choice
+from random import randint, choice, shuffle
 import cv2
 import numpy as np
 import json
@@ -481,13 +481,10 @@ class Simulation:
                 break
 
         new_values = [0 for _ in range(picker_count)]
-        x=0
         for _ in range(add_count):
-            x+=1
             idx = randint(0, picker_count - 1)
             new_values[idx] += 1
             
-        print(f'new_values, {x} kez tetiklendi')
         if adding_color:
             self.all_colors.clear()
             for _ in range(picker_count):
@@ -615,26 +612,41 @@ class Simulation:
             
                      
     def handle_random_buttons(self, onecycle):
-        usable_colors = sorted([picker for picker in self.colorPickers.pickers], key= lambda picker: picker.shownvalue, reverse=True)
-        if usable_colors:
-            for grid in self.grid.grids:
-                usable_colors = [usable_color for usable_color in usable_colors if usable_color.shownvalue > 0]
-                print([picker.shownvalue for picker in usable_colors])
-                if not usable_colors:
-                    return
-                color = choice(usable_colors).color
-                if not grid._is_full and onecycle:
-                    grid._is_full = True
-                    self.glasses.append(Glass(grid))
-                    self.glasses[-1].update_glass(fill = True, color = color)
+        color_weight_map = []
+        for picker in self.colorPickers.pickers:
+            usable_colors = {
+                picker.color: int(picker.shownvalue)
+                for picker in self.colorPickers.pickers if picker.shownvalue > 0
+            }
+        if not usable_colors:
+            print("No usable colors available to randomize")
+            return
+        
+        color_weight_map = []
+        for color, count in usable_colors.items():
+            color_weight_map.extend([color] * count)
+            
+        if onecycle:
+            first_empty_grid = [grid for grid in self.grid.grids if not grid._is_full][0]
+            if not first_empty_grid:
+                return
+            color = choice(color_weight_map)
+            first_empty_grid._is_full = True
+            new_glass = Glass(first_empty_grid)
+            new_glass.update_glass(fill= True, color= color)
+            self.glasses.append(new_glass)
+            
+        else:
+            shuffle(color_weight_map)
+            
+            for glass in self.glasses:
+                print(color_weight_map)
+                if not color_weight_map:
                     break
-                elif not onecycle:
-                    for usable_color in usable_colors:
-                        if usable_color.color == color:
-                            usable_color.shownvalue -= 1
-                    for glass in self.glasses:
-                        if glass.rect.center == grid.rect.center:
-                            glass.update_glass(fill = True, color = color)
+                if not hasattr(glass, "color"):
+                    color = color_weight_map.pop()
+                    glass.update_glass(fill= True, color= color)
+                
                     
     def coloring_mouse(self, coloring: bool = True):
         if coloring:
