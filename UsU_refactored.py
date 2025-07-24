@@ -1,5 +1,7 @@
 import sys
 import os
+import matplotlib
+matplotlib.use('TkAgg')  # Or another interactive backend like 'Qt5Agg'
 import matplotlib.pyplot as plt
 import pygame as pg
 from random import randint, choice, shuffle
